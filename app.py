@@ -21,7 +21,6 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # ── Local imports ──────────────────────────────────────────────────────────────
-from scrapers import UberScraper, OlaScraper, RapidoScraper
 from utils.location_helper import get_location_names, get_location_query
 from utils.data_logger import log_fares, load_history, clear_history, history_exists
 from utils.cookie_manager import cookie_status, delete_cookies, get_cookie_info
@@ -30,11 +29,11 @@ from utils.cookie_manager import cookie_status, delete_cookies, get_cookie_info
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# ── Platform config ────────────────────────────────────────────────────────────
+# ── Platform config (UI ONLY) ────────────────────────────────────────────────────────────
 PLATFORM_CONFIG = {
-    "Uber":   {"color": "#000000", "emoji": "⬛", "scraper": UberScraper},
-    "Ola":    {"color": "#3CB371", "emoji": "🟢", "scraper": OlaScraper},
-    "Rapido": {"color": "#FFD700", "emoji": "🟡", "scraper": RapidoScraper},
+    "Uber":   {"color": "#000000", "emoji": "⬛"},
+    "Ola":    {"color": "#3CB371", "emoji": "🟢"},
+    "Rapido": {"color": "#FFD700", "emoji": "🟡"},
 }
 
 # ── Page config ────────────────────────────────────────────────────────────────
