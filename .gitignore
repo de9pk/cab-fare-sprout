@@ -1,0 +1,25 @@
+# Credentials — NEVER commit these
+.env
+
+# Browser cookies (contain session tokens)
+cookies/
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+venv/
+.venv/
+env/
+
+# Data files
+data/fare_history.csv
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.swp
