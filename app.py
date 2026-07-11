@@ -24,6 +24,10 @@ load_dotenv()
 from utils.location_helper import get_location_names, get_location_query
 from utils.data_logger import log_fares, load_history, clear_history, history_exists
 from utils.cookie_manager import cookie_status, delete_cookies, get_cookie_info
+from scrapers.uber_scraper import UberScraper
+from scrapers.ola_scraper import OlaScraper
+from scrapers.rapido_scraper import RapidoScraper
+from geopy.geocoders import Nominatim
 
 # ── Logging ────────────────────────────────────────────────────────────────────
 logging.basicConfig(level=logging.INFO)
@@ -31,9 +35,9 @@ logger = logging.getLogger(__name__)
 
 # ── Platform config (UI ONLY) ────────────────────────────────────────────────────────────
 PLATFORM_CONFIG = {
-    "Uber":   {"color": "#000000", "emoji": "⬛"},
-    "Ola":    {"color": "#3CB371", "emoji": "🟢"},
-    "Rapido": {"color": "#FFD700", "emoji": "🟡"},
+    "Uber":   {"color": "#000000", "emoji": "⬛", "scraper": UberScraper},
+    "Ola":    {"color": "#3CB371", "emoji": "🟢", "scraper": OlaScraper},
+    "Rapido": {"color": "#FFD700", "emoji": "🟡", "scraper": RapidoScraper},
 }
 
 # ── Page config ────────────────────────────────────────────────────────────────
@@ -336,6 +340,24 @@ def fetch_all_fares(pickup: str, destination: str, selected: list) -> list:
     return results
 
 
+def fetch_real_fares(pickup: str, destination: str, selected: list) -> list:
+    """Fetch real fares by running platform scrapers concurrently."""
+    results = {}
+    threads = []
+    for platform in selected:
+        t = threading.Thread(target=run_scraper, args=(platform, pickup, destination, results))
+        t.start()
+        threads.append(t)
+    for t in threads:
+        t.join()
+    
+    final_results = []
+    for p in selected:
+        if p in results:
+            final_results.append(results[p])
+    return final_results
+
+
 def find_cheapest(results: list) -> str | None:
     """Return platform name of cheapest successful result."""
     successful = [r for r in results if r["status"] == "success" and r["fare_min"] > 0]
@@ -357,29 +379,29 @@ def render_fare_card(result: dict, is_cheapest: bool, savings: int = 0):
 
     if result["status"] == "success":
         content = f"""
-          <div class="fare-amount">{result['fare']}</div>
-          <div class="ride-type">{result['ride_type']}</div>
-          <div class="eta-text">🕐 ETA: {result['eta']}</div>
-          {f'<div class="savings-pill">💰 Save ₹{savings} vs most expensive</div>' if is_cheapest and savings > 0 else ''}
-          {f'<div class="ride-type" style="margin-top:6px;font-size:0.72rem;opacity:0.5">{result.get("error_msg", "")}</div>' if result.get("error_msg") else ''}
-        """
+<div class="fare-amount">{result['fare']}</div>
+<div class="ride-type">{result['ride_type']}</div>
+<div class="eta-text">🕐 ETA: {result['eta']}</div>
+{f'<div class="savings-pill">💰 Save ₹{savings} vs most expensive</div>' if is_cheapest and savings > 0 else ''}
+{f'<div class="ride-type" style="margin-top:6px;font-size:0.72rem;opacity:0.5">{result.get("error_msg", "")}</div>' if result.get("error_msg") else ''}
+"""
     else:
         content = f"""
-          <div class="fare-amount" style="font-size:1.4rem;color:#666">Unavailable</div>
-          <div class="error-msg">⚠ {result['error_msg']}</div>
-        """
+<div class="fare-amount" style="font-size:1.4rem;color:#666">Unavailable</div>
+<div class="error-msg">⚠ {result['error_msg']}</div>
+"""
 
     return f"""
-    <div class="{card_cls}">
-      <div>
-        <span class="platform-badge" style="background:{cfg['color']}22;color:{cfg['color']};border:1px solid {cfg['color']}44">
-          {cfg['emoji']} {platform}
-        </span>
-        {cheapest_badge}
-      </div>
-      {content}
-    </div>
-    """
+<div class="{card_cls}">
+  <div>
+    <span class="platform-badge" style="background:{cfg['color']}22;color:{cfg['color']};border:1px solid {cfg['color']}44">
+      {cfg['emoji']} {platform}
+    </span>
+    {cheapest_badge}
+  </div>
+{content}
+</div>
+"""
 
 
 def build_bar_chart(results: list, cheapest_platform: str):
@@ -479,6 +501,14 @@ init_session()
 
 with st.sidebar:
     st.markdown('<p class="section-header">⚙️ Settings</p>', unsafe_allow_html=True)
+
+    # Profile Mode (Demo vs Real)
+    st.markdown("**Profile Mode**")
+    profile_mode = st.radio("Choose Mode", [
+        "1. Demo Mode (No Login - Mock Data)", 
+        "2. Real Scraper (Requires Login)"
+    ], key="profile_mode")
+    st.divider()
 
     # Platform selection
     st.markdown("**Platforms**")
@@ -589,6 +619,28 @@ with tab_compare:
         </div>
         """, unsafe_allow_html=True)
 
+        with st.spinner("Loading map..."):
+            try:
+                geolocator = Nominatim(user_agent="cab_comparator")
+                # Add 'Jaipur' if not in string to improve geocoding
+                p_q = pickup_query if "Jaipur" in pickup_query else f"{pickup_query}, Jaipur"
+                d_q = dest_query if "Jaipur" in dest_query else f"{dest_query}, Jaipur"
+                
+                p_loc = geolocator.geocode(p_q, timeout=3)
+                d_loc = geolocator.geocode(d_q, timeout=3)
+                
+                coords = []
+                if p_loc:
+                    coords.append({"lat": p_loc.latitude, "lon": p_loc.longitude})
+                if d_loc:
+                    coords.append({"lat": d_loc.latitude, "lon": d_loc.longitude})
+                
+                if coords:
+                    df_map = pd.DataFrame(coords)
+                    st.map(df_map, zoom=11, use_container_width=True)
+            except Exception as e:
+                logger.error(f"Geocoding error: {e}")
+
     # Fetch button
     col_btn, col_time = st.columns([2, 3])
     with col_btn:
@@ -614,8 +666,11 @@ with tab_compare:
             st.toast(f"🔄 Auto-refreshing fares...", icon="🔄")
 
     if should_fetch and pickup_query and dest_query and selected_platforms:
-        with st.spinner(f"🚗 Scraping fares from {', '.join(selected_platforms)}..."):
-            results = fetch_all_fares(pickup_query, dest_query, selected_platforms)
+        with st.spinner(f"🚗 Fetching fares from {', '.join(selected_platforms)}..."):
+            if "Demo Mode" in st.session_state.profile_mode:
+                results = fetch_all_fares(pickup_query, dest_query, selected_platforms)
+            else:
+                results = fetch_real_fares(pickup_query, dest_query, selected_platforms)
 
         st.session_state.fare_results = results
         st.session_state.last_fetch_time = datetime.now()
